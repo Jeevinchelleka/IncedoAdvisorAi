@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ClientTable from "@/components/clients/ClientTable";
 import AllocationChart from "@/components/charts/AllocationChart";
 import KpiCard from "@/components/dashboard/KpiCard";
 import AIAssistantPanel from "@/components/ai/AIAssistantPanel";
+import ClientDetailDrawer from "@/components/clients/ClientDetailDrawer";
 import useClientStore from "@/store/clientStore";
 import { formatCurrency } from "@/lib/format";
 import { Users, TrendingUp, DollarSign, ShieldCheck } from "lucide-react";
 
 export default function ClientsPage() {
   const { clients, riskDistribution, loading, fetchClients } = useClientStore();
+  const [selectedClientId, setSelectedClientId] = useState(null);
 
   useEffect(() => {
     fetchClients();
@@ -65,7 +67,11 @@ export default function ClientsPage() {
         {/* Risk Distribution + Table */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
-            <ClientTable clients={clients} loading={loading} />
+            <ClientTable
+              clients={clients}
+              loading={loading}
+              onSelectClient={setSelectedClientId}
+            />
           </div>
           <div>
             <AllocationChart
@@ -75,6 +81,12 @@ export default function ClientsPage() {
           </div>
         </div>
       </div>
+
+      {/* Client Detail Slide-over Drawer */}
+      <ClientDetailDrawer
+        clientId={selectedClientId}
+        onClose={() => setSelectedClientId(null)}
+      />
     </DashboardShell>
   );
 }

@@ -1,32 +1,23 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import DashboardShell from "@/components/layout/DashboardShell";
 import KpiCard from "@/components/dashboard/KpiCard";
 import AIAssistantPanel from "@/components/ai/AIAssistantPanel";
 import AllocationChart from "@/components/charts/AllocationChart";
+import AlertTable from "@/components/compliance/AlertTable";
 import useComplianceStore from "@/store/complianceStore";
 import useDashboardStore from "@/store/dashboardStore";
-import { formatDate } from "@/lib/format";
-import { ShieldAlert, ShieldCheck, AlertTriangle, CheckCircle2, Clock, XCircle } from "lucide-react";
-
-const severityConfig = {
-  Critical: { bg: "bg-red-500/10 border-red-500/20", text: "text-red-400", badge: "bg-red-500/20 text-red-400" },
-  High:     { bg: "bg-orange-500/10 border-orange-500/20", text: "text-orange-400", badge: "bg-orange-500/20 text-orange-400" },
-  Medium:   { bg: "bg-amber-500/10 border-amber-500/20", text: "text-amber-400", badge: "bg-amber-500/20 text-amber-400" },
-  Low:      { bg: "bg-blue-500/10 border-blue-500/20", text: "text-blue-400", badge: "bg-blue-500/20 text-blue-400" },
-};
-
-const statusIcon = {
-  open: <AlertTriangle size={13} className="text-amber-400" />,
-  resolved: <CheckCircle2 size={13} className="text-emerald-400" />,
-  pending: <Clock size={13} className="text-blue-400" />,
-  closed: <XCircle size={13} className="text-gray-400" />,
-};
+import { ShieldAlert, ShieldCheck, AlertTriangle, Clock, Search } from "lucide-react";
 
 export default function CompliancePage() {
   const { alerts, stats, loading, fetchCompliance } = useComplianceStore();
   const { topHoldings, fetchAll } = useDashboardStore();
+
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
 
   useEffect(() => {
     fetchCompliance();
@@ -39,6 +30,24 @@ export default function CompliancePage() {
   const resolved = alerts.filter((a) => a.status === "resolved").length;
 
   const concentrationViolations = topHoldings.filter((h) => (h.allocation || 0) > 25);
+
+  // Derive unique alert types dynamically
+  const uniqueTypes = ["all", ...new Set(alerts.map((a) => a.alertType).filter(Boolean))];
+
+  // Filter alerts
+  const filteredAlerts = alerts.filter((alert) => {
+    const matchesSearch =
+      search.trim() === "" ||
+      alert.alertMessage?.toLowerCase().includes(search.toLowerCase()) ||
+      `${alert.client?.firstName} ${alert.client?.lastName}`.toLowerCase().includes(search.toLowerCase()) ||
+      alert.client?.email?.toLowerCase().includes(search.toLowerCase());
+
+    const matchesStatus = statusFilter === "all" || alert.status === statusFilter;
+    const matchesSeverity = severityFilter === "all" || alert.severity === severityFilter;
+    const matchesType = typeFilter === "all" || alert.alertType === typeFilter;
+
+    return matchesSearch && matchesStatus && matchesSeverity && matchesType;
+  });
 
   return (
     <DashboardShell rightPanel={<AIAssistantPanel />}>
@@ -56,55 +65,79 @@ export default function CompliancePage() {
           <KpiCard title="Resolved"        value={loading ? "—" : resolved.toString()}       icon={ShieldCheck}  color="green"  loading={loading} />
         </div>
 
+        {/* Filter bar */}
+        <div className="bg-[#0b1120] border border-[#1f2937] rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-500" />
+            <input
+              type="text"
+              placeholder="Search alerts by client name, email, or message..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-[#111827] border border-[#1f2937] rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Status Filter */}
+            <div className="flex items-center gap-1.5 bg-[#111827] border border-[#1f2937] rounded-xl px-2.5 py-1.5">
+              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Status:</span>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="bg-transparent text-xs text-gray-300 font-semibold focus:outline-none cursor-pointer"
+              >
+                <option value="all" className="bg-[#111827]">All</option>
+                <option value="open" className="bg-[#111827]">Open</option>
+                <option value="investigating" className="bg-[#111827]">Investigating</option>
+                <option value="resolved" className="bg-[#111827]">Resolved</option>
+                <option value="closed" className="bg-[#111827]">Closed</option>
+              </select>
+            </div>
+
+            {/* Severity Filter */}
+            <div className="flex items-center gap-1.5 bg-[#111827] border border-[#1f2937] rounded-xl px-2.5 py-1.5">
+              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Severity:</span>
+              <select
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value)}
+                className="bg-transparent text-xs text-gray-300 font-semibold focus:outline-none cursor-pointer"
+              >
+                <option value="all" className="bg-[#111827]">All</option>
+                <option value="Critical" className="bg-[#111827]">Critical</option>
+                <option value="High" className="bg-[#111827]">High</option>
+                <option value="Medium" className="bg-[#111827]">Medium</option>
+                <option value="Low" className="bg-[#111827]">Low</option>
+              </select>
+            </div>
+
+            {/* Type Filter */}
+            <div className="flex items-center gap-1.5 bg-[#111827] border border-[#1f2937] rounded-xl px-2.5 py-1.5">
+              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Type:</span>
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                className="bg-transparent text-xs text-gray-300 font-semibold focus:outline-none cursor-pointer capitalize"
+              >
+                {uniqueTypes.map((t) => (
+                  <option key={t} value={t} className="bg-[#111827]">
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Alerts table */}
-          <div className="lg:col-span-2 bg-[#0b1120] border border-[#1f2937] rounded-2xl p-5">
-            <h2 className="text-sm font-semibold text-white mb-4">Compliance Alerts</h2>
-            {loading ? (
-              [1,2,3,4].map(i => <div key={i} className="h-16 bg-gray-800/40 rounded-xl animate-pulse mb-2" />)
-            ) : alerts.length === 0 ? (
-              <div className="flex flex-col items-center py-10 text-center">
-                <ShieldCheck size={28} className="text-emerald-400 mb-2" />
-                <p className="text-sm font-medium text-white">All Clear</p>
-                <p className="text-xs text-gray-500 mt-1">No compliance alerts found</p>
-              </div>
-            ) : (
-              <div className="space-y-2.5 max-h-[480px] overflow-y-auto pr-1">
-                {alerts.map((alert, i) => {
-                  const cfg = severityConfig[alert.severity] || severityConfig.Low;
-                  return (
-                    <div key={i} className={`border rounded-xl p-3.5 ${cfg.bg}`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`text-xs font-semibold ${cfg.text}`}>{alert.alertMessage}</span>
-                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${cfg.badge}`}>
-                              {alert.severity}
-                            </span>
-                          </div>
-                          {alert.client && (
-                            <p className="text-[11px] text-gray-400 mt-1">
-                              Client: {alert.client.firstName} {alert.client.lastName}
-                              {alert.client.riskProfile && ` · ${alert.client.riskProfile}`}
-                            </p>
-                          )}
-                          <p className="text-[10px] text-gray-600 mt-1">{formatDate(alert.createdAt)}</p>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {statusIcon[alert.status] || statusIcon.open}
-                          <span className="text-[11px] text-gray-400 capitalize">{alert.status}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+          <div className="lg:col-span-2 space-y-4">
+            <AlertTable alerts={filteredAlerts} loading={loading} />
           </div>
 
-          {/* Severity distribution */}
+          {/* Severity & Status distribution */}
           <div className="space-y-4">
             <AllocationChart
+              title="Alerts by Severity"
               data={stats?.bySeverity || []}
               loading={loading}
             />
@@ -112,11 +145,10 @@ export default function CompliancePage() {
             {stats?.byStatus && stats.byStatus.length > 0 && (
               <div className="bg-[#0b1120] border border-[#1f2937] rounded-2xl p-5">
                 <h2 className="text-sm font-semibold text-white mb-3">By Status</h2>
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   {stats.byStatus.map((s, i) => (
                     <div key={i} className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        {statusIcon[s.name] || statusIcon.open}
                         <span className="text-xs text-gray-300 capitalize">{s.name}</span>
                       </div>
                       <span className="text-xs font-semibold text-white">{s.value}</span>
@@ -134,7 +166,7 @@ export default function CompliancePage() {
           <p className="text-xs text-gray-500 mb-4">Holdings exceeding 25% allocation threshold</p>
           {concentrationViolations.length === 0 ? (
             <div className="flex items-center gap-2 text-emerald-400 text-sm">
-              <CheckCircle2 size={16} />
+              <ShieldCheck size={16} />
               <span>No concentration violations detected</span>
             </div>
           ) : (

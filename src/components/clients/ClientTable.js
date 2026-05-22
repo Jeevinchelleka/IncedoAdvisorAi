@@ -11,7 +11,7 @@ const riskColors = {
   "Very Aggressive": "bg-orange-500/15 text-orange-400",
 };
 
-export default function ClientTable({ clients = [], loading = false }) {
+export default function ClientTable({ clients = [], loading = false, onSelectClient }) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("createdAt");
   const [sortDir, setSortDir] = useState("desc");
@@ -116,6 +116,7 @@ export default function ClientTable({ clients = [], loading = false }) {
                 return (
                   <tr
                     key={client.id}
+                    onClick={() => onSelectClient && onSelectClient(client.id)}
                     className="border-b border-[#111827] hover:bg-white/[0.02] transition-colors cursor-pointer"
                   >
                     <td className="py-3.5 px-2">

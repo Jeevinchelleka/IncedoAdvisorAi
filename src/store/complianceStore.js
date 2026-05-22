@@ -20,6 +20,20 @@ const useComplianceStore = create((set) => ({
       set({ loading: false, error: "Failed to load compliance data" });
     }
   },
+
+  updateAlert: async (id, status, notes) => {
+    try {
+      await api.patch(`/compliance/alerts/${id}`, { status, notes });
+      const [alerts, stats] = await Promise.all([
+        api.get("/compliance/alerts"),
+        api.get("/compliance/stats"),
+      ]);
+      set({ alerts: alerts.data, stats: stats.data });
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+  },
 }));
 
 export default useComplianceStore;
