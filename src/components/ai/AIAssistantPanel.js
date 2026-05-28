@@ -305,7 +305,14 @@ export default function AIAssistantPanel() {
           </div>
         ) : (
           messages.map(msg => (
-            <MessageBubble key={msg.id} msg={msg} onSuggestionClick={sendMessage} />
+            <MessageBubble
+              key={msg.id}
+              msg={msg}
+              onSuggestionClick={(s) => {
+                setInput(s);
+                inputRef.current?.focus();
+              }}
+            />
           ))
         )}
 
