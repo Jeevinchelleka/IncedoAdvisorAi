@@ -3,7 +3,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import {
   Send, Bot, User, Loader2, Sparkles, Plus,
-  Database, ChevronRight, History, X, RefreshCw,
+  Database, ChevronRight, History, X, RefreshCw, Mic, MicOff,
 } from "lucide-react";
 import api from "@/lib/api";
 import { formatDate } from "@/lib/format";
@@ -29,9 +29,9 @@ const INTENT_LABELS = {
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
-function MessageBubble({ msg, onSuggestionClick }) {
-  const isUser = msg.role === "user";
-  const meta = msg.metadata;
+function MessageBubble({ msg, onSuggestionClick, streaming }) {
+  const isUser   = msg.role === "user";
+  const meta     = msg.metadata;
   const intentCfg = meta?.intent ? INTENT_LABELS[meta.intent] : null;
 
   return (
@@ -43,7 +43,6 @@ function MessageBubble({ msg, onSuggestionClick }) {
       </div>
 
       <div className={`max-w-[88%] flex flex-col gap-1.5 ${isUser ? "items-end" : "items-start"}`}>
-        {/* Intent + sources badge */}
         {!isUser && intentCfg && (
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${intentCfg.color}`}>
@@ -59,17 +58,19 @@ function MessageBubble({ msg, onSuggestionClick }) {
           </div>
         )}
 
-        {/* Bubble */}
         <div className={`rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap ${
           isUser
             ? "bg-blue-600 text-white rounded-tr-sm"
             : "bg-[#111827] border border-[#1f2937] text-gray-200 rounded-tl-sm"
         }`}>
           {msg.content}
+          {/* blinking cursor while streaming */}
+          {streaming && !isUser && (
+            <span className="inline-block w-1.5 h-3.5 bg-blue-400 rounded-sm ml-0.5 animate-pulse align-middle" />
+          )}
         </div>
 
-        {/* Follow-up suggestions */}
-        {!isUser && meta?.suggestions?.length > 0 && (
+        {!isUser && !streaming && meta?.suggestions?.length > 0 && (
           <div className="space-y-0.5">
             {meta.suggestions.slice(0, 3).map((s, i) => (
               <button
@@ -127,24 +128,66 @@ function HistorySidebar({ conversations, onSelect, onClose, activeId }) {
   );
 }
 
+// ─── Voice Input Hook ─────────────────────────────────────────────────────────
+
+function useVoiceInput({ onResult, onError }) {
+  const [listening, setListening] = useState(false);
+  const recRef = useRef(null);
+
+  const supported = typeof window !== "undefined" &&
+    ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+
+  const toggle = useCallback(() => {
+    if (!supported) return onError?.("Voice input not supported in this browser.");
+
+    if (listening) {
+      recRef.current?.stop();
+      setListening(false);
+      return;
+    }
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    rec.lang = "en-US";
+    rec.continuous = false;
+    rec.interimResults = false;
+
+    rec.onresult = (e) => {
+      const transcript = e.results[0][0].transcript;
+      onResult?.(transcript);
+    };
+    rec.onerror = (e) => {
+      onError?.(e.error === "not-allowed" ? "Microphone access denied." : "Voice error: " + e.error);
+    };
+    rec.onend = () => setListening(false);
+
+    recRef.current = rec;
+    rec.start();
+    setListening(true);
+  }, [listening, supported, onResult, onError]);
+
+  return { listening, toggle, supported };
+}
+
 // ─── Main Panel ───────────────────────────────────────────────────────────────
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://advsiorai-backend-production.up.railway.app";
+
 export default function AIAssistantPanel() {
-  const [messages, setMessages] = useState([WELCOME_MSG]);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [conversationId, setConversationId] = useState(null);
-  const [conversations, setConversations] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  const listRef = useRef(null);
+  const [messages,        setMessages]        = useState([WELCOME_MSG]);
+  const [input,           setInput]           = useState("");
+  const [isLoading,       setIsLoading]       = useState(false);
+  const [streamingId,     setStreamingId]     = useState(null);
+  const [conversationId,  setConversationId]  = useState(null);
+  const [conversations,   setConversations]   = useState([]);
+  const [showHistory,     setShowHistory]     = useState(false);
+  const [loadingHistory,  setLoadingHistory]  = useState(false);
+  const [voiceError,      setVoiceError]      = useState("");
+  const listRef  = useRef(null);
   const inputRef = useRef(null);
 
-  // Load conversation list on mount
   useEffect(() => {
-    api.get("/conversations")
-      .then(r => setConversations(r.data || []))
-      .catch(() => {});
+    api.get("/conversations").then(r => setConversations(r.data || [])).catch(() => {});
   }, []);
 
   const scrollToBottom = useCallback(() => {
@@ -153,30 +196,28 @@ export default function AIAssistantPanel() {
     }, 50);
   }, []);
 
-  // Resume a past conversation — load all messages from DB
+  const { listening, toggle: toggleVoice, supported: voiceSupported } = useVoiceInput({
+    onResult: (text) => { setInput(text); inputRef.current?.focus(); },
+    onError:  (msg)  => { setVoiceError(msg); setTimeout(() => setVoiceError(""), 3000); },
+  });
+
   const resumeConversation = async (conv) => {
     setLoadingHistory(true);
     setShowHistory(false);
     try {
       const res = await api.get(`/conversations/${conv.id}`);
-      const dbMessages = res.data.messages || [];
       const restored = [
         WELCOME_MSG,
-        ...dbMessages.map((m, i) => ({
-          id: `hist-${i}`,
-          role: m.sender === "user" ? "user" : "assistant",
-          content: m.message || "",
-          metadata: null,
+        ...(res.data.messages || []).map((m, i) => ({
+          id: `hist-${i}`, role: m.sender === "user" ? "user" : "assistant",
+          content: m.message || "", metadata: null,
         })),
       ];
       setMessages(restored);
       setConversationId(conv.id);
       scrollToBottom();
-    } catch (e) {
-      console.error("Failed to load conversation:", e.message);
-    } finally {
-      setLoadingHistory(false);
-    }
+    } catch {}
+    finally { setLoadingHistory(false); }
   };
 
   const startNewChat = () => {
@@ -187,27 +228,74 @@ export default function AIAssistantPanel() {
     inputRef.current?.focus();
   };
 
+  // ─── Streaming send ────────────────────────────────────────────────────────
   const sendMessage = async (text) => {
     const userMessage = (text || input).trim();
     if (!userMessage || isLoading) return;
 
     const userMsg = { id: `u-${Date.now()}`, role: "user", content: userMessage, metadata: null };
-    setMessages(cur => [...cur, userMsg]);
+    const aiId    = `a-${Date.now()}`;
+    const aiMsg   = { id: aiId, role: "assistant", content: "", metadata: null };
+
+    setMessages(cur => [...cur, userMsg, aiMsg]);
     setInput("");
     setIsLoading(true);
+    setStreamingId(aiId);
     scrollToBottom();
 
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+
     try {
-      const res = await api.post("/ai/chat", {
-        message: userMessage,
-        history: [],           // Backend loads from DB via conversationId
-        conversationId,        // Pass so backend can load full history
+      const res = await fetch(`${API_URL}/ai/chat/stream`, {
+        method:  "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ message: userMessage, conversationId }),
       });
 
-      const { response, metadata } = res.data;
-      const aiMsg = { id: `a-${Date.now()}`, role: "assistant", content: response, metadata };
-      setMessages(cur => [...cur, aiMsg]);
-      scrollToBottom();
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let   buffer  = "";
+      let   fullText = "";
+      let   meta    = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw) continue;
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.token) {
+              fullText += parsed.token;
+              setMessages(cur =>
+                cur.map(m => m.id === aiId ? { ...m, content: fullText } : m)
+              );
+              scrollToBottom();
+            }
+            if (parsed.intent || parsed.tables) {
+              meta = { ...(meta || {}), intent: parsed.intent, tablesQueried: parsed.tables };
+            }
+            if (parsed.fullText !== undefined) {
+              fullText = parsed.fullText;
+              meta = { intent: parsed.intent, tablesQueried: parsed.tables };
+            }
+          } catch {}
+        }
+      }
+
+      setMessages(cur => cur.map(m => m.id === aiId ? { ...m, content: fullText, metadata: meta } : m));
 
       // Persist to DB
       try {
@@ -216,35 +304,31 @@ export default function AIAssistantPanel() {
             title: userMessage.slice(0, 60),
             messages: [
               { sender: "user",      message: userMessage },
-              { sender: "assistant", message: response },
+              { sender: "assistant", message: fullText },
             ],
           });
           setConversationId(conv.data.id);
-          // Refresh conversation list
           setConversations(cur => [conv.data, ...cur]);
         } else {
           await Promise.all([
             api.post(`/conversations/${conversationId}/messages`, { sender: "user",      message: userMessage }),
-            api.post(`/conversations/${conversationId}/messages`, { sender: "assistant", message: response }),
+            api.post(`/conversations/${conversationId}/messages`, { sender: "assistant", message: fullText }),
           ]);
         }
-      } catch { /* non-critical */ }
+      } catch {}
 
     } catch (err) {
-      const detail = err?.response?.data?.detail || err?.response?.data?.error || "Could not reach the AI service.";
-      setMessages(cur => [...cur, {
-        id: `err-${Date.now()}`, role: "assistant",
-        content: `⚠️ Error: ${detail}`, metadata: null,
-      }]);
+      const detail = err.message || "Could not reach the AI service.";
+      setMessages(cur => cur.map(m => m.id === aiId ? { ...m, content: `⚠️ Error: ${detail}` } : m));
     } finally {
       setIsLoading(false);
+      setStreamingId(null);
       scrollToBottom();
     }
   };
 
   return (
     <div className="h-full flex flex-col relative">
-      {/* History Sidebar */}
       {showHistory && (
         <HistorySidebar
           conversations={conversations}
@@ -262,7 +346,7 @@ export default function AIAssistantPanel() {
           </div>
           <div className="flex-1 min-w-0">
             <h2 className="text-xs font-semibold text-white">AI Concierge</h2>
-            <p className="text-[10px] text-gray-500">Semantic RAG · Gemini · Live DB</p>
+            <p className="text-[10px] text-gray-500">RAG · Gemini · Streaming · Live DB</p>
           </div>
           <div className="flex items-center gap-1.5">
             <div className="flex items-center gap-1">
@@ -287,7 +371,6 @@ export default function AIAssistantPanel() {
         </div>
       </div>
 
-      {/* Resumed conversation banner */}
       {conversationId && messages.length > 1 && (
         <div className="px-4 py-1.5 bg-blue-600/5 border-b border-blue-600/10 flex items-center justify-between">
           <span className="text-[10px] text-blue-400">Continuing previous conversation</span>
@@ -308,15 +391,13 @@ export default function AIAssistantPanel() {
             <MessageBubble
               key={msg.id}
               msg={msg}
-              onSuggestionClick={(s) => {
-                setInput(s);
-                inputRef.current?.focus();
-              }}
+              streaming={msg.id === streamingId}
+              onSuggestionClick={(s) => { setInput(s); inputRef.current?.focus(); }}
             />
           ))
         )}
 
-        {isLoading && (
+        {isLoading && streamingId === null && (
           <div className="flex gap-2">
             <div className="w-6 h-6 rounded-lg bg-[#1f2937] border border-[#374151] flex items-center justify-center shrink-0">
               <Bot size={11} className="text-gray-400" />
@@ -332,17 +413,42 @@ export default function AIAssistantPanel() {
         )}
       </div>
 
+      {/* Voice error toast */}
+      {voiceError && (
+        <div className="mx-3 mb-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2 text-[11px] text-red-400">
+          {voiceError}
+        </div>
+      )}
+
       {/* Input */}
       <form onSubmit={e => { e.preventDefault(); sendMessage(); }} className="px-3 py-3 border-t border-[#1f2937] shrink-0">
         <div className="flex gap-2">
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            placeholder="Ask about portfolios, clients, compliance..."
-            className="flex-1 bg-[#111827] border border-[#1f2937] rounded-xl px-3.5 py-2 text-xs text-gray-200 placeholder-gray-600 outline-none focus:border-blue-600/50 transition-all"
-            disabled={isLoading}
-          />
+          <div className="flex-1 flex items-center gap-1 bg-[#111827] border border-[#1f2937] rounded-xl px-3 focus-within:border-blue-600/50 transition-all">
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder="Ask about portfolios, clients, compliance..."
+              className="flex-1 bg-transparent py-2 text-xs text-gray-200 placeholder-gray-600 outline-none"
+              disabled={isLoading}
+            />
+            {/* Voice button */}
+            {voiceSupported && (
+              <button
+                type="button"
+                onClick={toggleVoice}
+                disabled={isLoading}
+                title={listening ? "Stop listening" : "Voice input"}
+                className={`shrink-0 w-6 h-6 flex items-center justify-center rounded-lg transition-all ${
+                  listening
+                    ? "text-red-400 bg-red-500/10 animate-pulse"
+                    : "text-gray-500 hover:text-blue-400 hover:bg-blue-500/10"
+                }`}
+              >
+                {listening ? <MicOff size={13} /> : <Mic size={13} />}
+              </button>
+            )}
+          </div>
           <button
             type="submit"
             disabled={isLoading || !input.trim()}
@@ -350,7 +456,8 @@ export default function AIAssistantPanel() {
           >
             {isLoading
               ? <Loader2 size={13} className="text-white animate-spin" />
-              : <Send size={13} className="text-white" />}
+              : <Send size={13} className="text-white" />
+            }
           </button>
         </div>
       </form>
