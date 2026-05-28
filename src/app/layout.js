@@ -2,7 +2,7 @@ import "./globals.css";
 
 export const metadata = {
   title: "AdvisorAI",
-  description: "AI Financial Platform",
+  description: "AI-Powered Wealth Intelligence Platform",
 };
 
 export default function RootLayout({ children }) {

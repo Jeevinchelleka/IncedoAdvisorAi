@@ -1,37 +1,68 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
-import { TrendingUp, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { TrendingUp, Eye, EyeOff, AlertCircle, Shield } from "lucide-react";
+import useAuthStore from "@/store/authStore";
+
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+// Demo accounts shown on login page
+const DEMO_ACCOUNTS = [
+  { email: "john.advisor@test.com",     password: "password123", role: "advisor",    label: "Advisor" },
+  { email: "sarah.compliance@test.com", password: "password123", role: "compliance", label: "Compliance" },
+  { email: "mike.ops@test.com",         password: "password123", role: "operations", label: "Operations" },
+  { email: "olivia.admin@test.com",     password: "password123", role: "admin",      label: "Admin" },
+];
+
+const ROLE_COLORS = {
+  advisor:    "border-blue-600/30 text-blue-400 bg-blue-600/5 hover:bg-blue-600/10",
+  compliance: "border-amber-600/30 text-amber-400 bg-amber-600/5 hover:bg-amber-600/10",
+  operations: "border-purple-600/30 text-purple-400 bg-purple-600/5 hover:bg-purple-600/10",
+  admin:      "border-red-600/30 text-red-400 bg-red-600/5 hover:bg-red-600/10",
+};
 
 export default function LoginPage() {
   const router = useRouter();
+  const { login, user } = useAuthStore();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleLogin = async (e) => {
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user) router.replace("/dashboard");
+  }, [user, router]);
+
+  const handleLogin = async (e, overrideEmail, overridePassword) => {
     e?.preventDefault();
-    if (!email || !password) {
+    const loginEmail    = overrideEmail    || email;
+    const loginPassword = overridePassword || password;
+
+    if (!loginEmail || !loginPassword) {
       setError("Please enter your email and password.");
       return;
     }
     setLoading(true);
     setError("");
+
     try {
-      const response = await axios.post(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/auth/login`,
-        { email, password }
-      );
-      localStorage.setItem("token", response.data.token);
+      // Login
+      const loginRes = await axios.post(`${API}/auth/login`, { email: loginEmail, password: loginPassword });
+      const { token, user: userData } = loginRes.data;
+
+      // Fetch permissions with the new token
+      const permRes = await axios.get(`${API}/auth/permissions`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      login(userData, token, permRes.data.permissions);
       router.push("/dashboard");
     } catch (err) {
-      setError(
-        err?.response?.data?.error || "Login failed. Please check your credentials."
-      );
+      setError(err?.response?.data?.error || "Login failed. Please check your credentials.");
     } finally {
       setLoading(false);
     }
@@ -39,7 +70,6 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#050816] px-4">
-      {/* Background glow */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-blue-600/5 rounded-full blur-3xl" />
       </div>
@@ -109,15 +139,34 @@ export default function LoginPage() {
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   Signing in...
                 </span>
-              ) : (
-                "Sign In"
-              )}
+              ) : "Sign In"}
             </button>
           </form>
         </div>
 
-        <p className="text-center text-xs text-gray-600 mt-5">
-          AdvisorAI · AI-Powered Wealth Intelligence
+        {/* Demo accounts */}
+        <div className="mt-4 bg-[#0b1120] border border-[#1f2937] rounded-2xl p-4">
+          <div className="flex items-center gap-1.5 mb-3">
+            <Shield size={12} className="text-gray-500" />
+            <p className="text-[11px] text-gray-500 font-medium">Demo accounts — click to sign in</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {DEMO_ACCOUNTS.map((acc) => (
+              <button
+                key={acc.role}
+                onClick={() => handleLogin(null, acc.email, acc.password)}
+                disabled={loading}
+                className={`text-left px-3 py-2 rounded-xl border text-xs font-medium transition-all disabled:opacity-50 ${ROLE_COLORS[acc.role]}`}
+              >
+                <p className="font-semibold">{acc.label}</p>
+                <p className="text-[10px] opacity-70 mt-0.5 truncate">{acc.email}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <p className="text-center text-xs text-gray-600 mt-4">
+          AdvisorAI · Role-Based Access Control · Zero-Trust Security
         </p>
       </div>
     </div>
